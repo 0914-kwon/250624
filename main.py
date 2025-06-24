@@ -1,55 +1,59 @@
 import streamlit as st
 import pandas as pd
 
-def app():
-    st.title('대한민국 연령대별 인구 분포 (상위 5개 행정구역 기준)')
+# CSV 파일 경로 (파일명에 맞게 변경)
+CSV_PATH = "202505_202505_연령별인구현황_월간 (2).csv"
 
-    # 데이터 불러오기 ('euc-kr' 인코딩 사용)
-    df = pd.read_csv('202505_202505_연령별인구현황_월간.csv', encoding='euc-kr')
+@st.cache_data
+def load_and_process_data():
+    df = pd.read_csv(CSV_PATH, encoding="euc-kr")
 
-    # 데이터 전처리: 행정구역 이름 정제
-    df['행정구역'] = df['행정구역'].astype(str).str.split(' ').str[0]
+    # 총인구수 숫자 컬럼으로 분리
+    df["총인구수"] = df["2025년05월_계_총인구수"].str.replace(",", "").astype(int)
 
-    # 열 이름 변경 (2025년 5월 기준 열에서 불필요한 접두사 제거)
-    새로운_열_이름 = []
-    for 열 in df.columns:
-        if '2025년05월_계_' in 열:
-            새_열 = 열.replace('2025년05월_계_', '')
-            if '총인구수' in 새_열:
-                새_열 = '총인구수'
-            elif '연령구간인구수' in 새_열:
-                새_열 = '연령구간인구수'
-            else:
-                새_열 = 새_열.replace('세', '세')  # 유지
-            새로운_열_이름.append(새_열)
-        else:
-            새로운_열_이름.append(열)
-    df.columns = 새로운_열_이름
+    # 연령별 열 필터링 및 이름 정제
+    age_cols = [col for col in df.columns if col.startswith("2025년05월_계_") and "세" in col]
+    rename_map = {col: col.replace("2025년05월_계_", "").replace("세", "").strip() for col in age_cols}
+    df_age = df[["행정구역"] + age_cols].rename(columns=rename_map)
 
-    # 문자열 숫자에서 쉼표 제거 후 정수형으로 변환
-    숫자열_목록 = [열 for 열 in df.columns if 열 != '행정구역']
-    for 열 in 숫자열_목록:
-        df[열] = df[열].astype(str).str.replace(',', '', regex=False).astype(int)
+    # 쉼표 제거 후 숫자형 변환
+    for col in df_age.columns[1:]:
+        if df_age[col].dtype == object:
+            df_age[col] = df_age[col].str.replace(",", "").astype(int)
 
-    # 총인구수 기준 상위 5개 행정구역 추출
-    상위5_지역 = df.sort_values(by='총인구수', ascending=False).head(5)['행정구역'].tolist()
-    df_상위5 = df[df['행정구역'].isin(상위5_지역)].copy()
+    # 병합
+    df_all = pd.merge(df[["행정구역", "총인구수"]], df_age, on="행정구역")
+    return df_all
 
-    # 연령대별 인구 정보를 긴 형태로 변환
-    df_변환 = df_상위5.melt(id_vars=['행정구역', '총인구수', '연령구간인구수'],
-                          var_name='연령',
-                          value_name='인구수')
-    df_변환['연령'] = df_변환['연령'].str.extract('(\d+)').astype(int)
+# 앱 UI 구성
+st.title("2025년 5월 기준 연령별 인구 현황 분석")
+st.markdown("총인구수가 많은 상위 5개 행정구역의 연령별 인구 분포를 선 그래프로 시각화합니다.")
 
-    st.write("---")
-    st.header("원본 데이터")
-    st.dataframe(df)
+# 데이터 불러오기
+df_all = load_and_process_data()
 
-    st.write("---")
-    st.header("상위 5개 행정구역의 연령대별 인구 분포")
+# 총인구수 기준 상위 5개 지역 추출
+top5_df = df_all.sort_values(by="총인구수", ascending=False).head(5)
 
-    피벗_데이터 = df_변환.pivot_table(index='연령', columns='행정구역', values='인구수')
-    st.line_chart(피벗_데이터)
+# 원본 데이터 표시
+st.subheader("📋 상위 5개 행정구역 원본 데이터")
+st.dataframe(top5_df)
 
-if __name__ == '__main__':
-    app()
+# 연령별 인구 그래프 준비
+st.subheader("📈 연령별 인구 선 그래프")
+
+age_columns = [col for col in top5_df.columns if col not in ["행정구역", "총인구수"]]
+age_sorted = sorted(age_columns, key=lambda x: int(x.replace("이상", "1000")))
+
+chart_data = top5_df.set_index("행정구역")[age_sorted].T
+chart_data.index.name = "연령"
+
+# Streamlit 기본 line_chart 사용
+st.line_chart(chart_data)
+
+# 설명
+st.markdown("""
+- 데이터 출처: 통계청  
+- 단위: 명  
+- 연령은 0세부터 100세 이상까지 포함됩니다.  
+""")
