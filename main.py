@@ -1,62 +1,55 @@
 import streamlit as st
 import pandas as pd
 
-# CSV 파일 경로
-CSV_PATH = "202505_202505_연령별인구현황_월간 (2).csv"
+def app():
+    st.title('대한민국 연령대별 인구 분포 (상위 5개 행정구역 기준)')
 
-# 데이터 불러오기
-@st.cache_data
-def load_data():
-    df = pd.read_csv(CSV_PATH, encoding="euc-kr")
-    
-    # 총인구수 컬럼 정리
-    df["총인구수"] = df["2025년05월_계_총인구수"].str.replace(",", "").astype(int)
+    # 데이터 불러오기 ('euc-kr' 인코딩 사용)
+    df = pd.read_csv('202505_202505_연령별인구현황_월간.csv', encoding='euc-kr')
 
-    # 연령별 인구 열만 선택
-    age_cols = [col for col in df.columns if col.startswith("2025년05월_계_") and "세" in col]
-    rename_cols = {
-        col: col.replace("2025년05월_계_", "").replace("세", "").replace(" ", "") 
-        for col in age_cols
-    }
+    # 데이터 전처리: 행정구역 이름 정제
+    df['행정구역'] = df['행정구역'].astype(str).str.split(' ').str[0]
 
-    df_ages = df[["행정구역"] + age_cols].rename(columns=rename_cols)
+    # 열 이름 변경 (2025년 5월 기준 열에서 불필요한 접두사 제거)
+    새로운_열_이름 = []
+    for 열 in df.columns:
+        if '2025년05월_계_' in 열:
+            새_열 = 열.replace('2025년05월_계_', '')
+            if '총인구수' in 새_열:
+                새_열 = '총인구수'
+            elif '연령구간인구수' in 새_열:
+                새_열 = '연령구간인구수'
+            else:
+                새_열 = 새_열.replace('세', '세')  # 유지
+            새로운_열_이름.append(새_열)
+        else:
+            새로운_열_이름.append(열)
+    df.columns = 새로운_열_이름
 
-    # 문자열 숫자 변환
-    for col in df_ages.columns[1:]:
-        if df_ages[col].dtype == object:
-            df_ages[col] = df_ages[col].str.replace(",", "").astype(int)
+    # 문자열 숫자에서 쉼표 제거 후 정수형으로 변환
+    숫자열_목록 = [열 for 열 in df.columns if 열 != '행정구역']
+    for 열 in 숫자열_목록:
+        df[열] = df[열].astype(str).str.replace(',', '', regex=False).astype(int)
 
-    # 전체 병합
-    df_full = pd.merge(df[["행정구역", "총인구수"]], df_ages, on="행정구역")
-    return df_full
+    # 총인구수 기준 상위 5개 행정구역 추출
+    상위5_지역 = df.sort_values(by='총인구수', ascending=False).head(5)['행정구역'].tolist()
+    df_상위5 = df[df['행정구역'].isin(상위5_지역)].copy()
 
-# 앱 제목
-st.title("2025년 5월 기준 연령별 인구 현황 분석")
+    # 연령대별 인구 정보를 긴 형태로 변환
+    df_변환 = df_상위5.melt(id_vars=['행정구역', '총인구수', '연령구간인구수'],
+                          var_name='연령',
+                          value_name='인구수')
+    df_변환['연령'] = df_변환['연령'].str.extract('(\d+)').astype(int)
 
-# 데이터 불러오기
-df = load_data()
+    st.write("---")
+    st.header("원본 데이터")
+    st.dataframe(df)
 
-# 상위 5개 행정구역 추출
-top5_df = df.sort_values(by="총인구수", ascending=False).head(5)
+    st.write("---")
+    st.header("상위 5개 행정구역의 연령대별 인구 분포")
 
-# 전체 데이터프레임 보여주기
-st.subheader("📋 원본 데이터 (총인구수 기준 상위 5개 지역)")
-st.dataframe(top5_df)
+    피벗_데이터 = df_변환.pivot_table(index='연령', columns='행정구역', values='인구수')
+    st.line_chart(피벗_데이터)
 
-# 연령 목록 추출
-age_columns = [col for col in top5_df.columns if col not in ["행정구역", "총인구수"]]
-age_sorted = sorted(age_columns, key=lambda x: int(x.replace("이상", "").replace("세", "")) if x.isdigit() else 999)
-
-# 연령별 인구 선그래프
-st.subheader("📈 연령별 인구 선 그래프")
-
-top5_chart_df = top5_df.set_index("행정구역")[age_sorted].T
-top5_chart_df.index.name = "연령"
-
-st.line_chart(top5_chart_df)
-
-# 설명
-st.markdown("""
-- 본 데이터는 통계청의 2025년 5월 기준 연령별 인구 자료를 기반으로 하며,
-- 총인구수가 가장 많은 5개 행정구역을 기준으로 연령 분포를 시각화하였습니다.
-""")
+if __name__ == '__main__':
+    app()
